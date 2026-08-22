@@ -16,7 +16,7 @@ for var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy
 
 TOKEN_DISCORD = os.getenv("TOKEN_DISCORD")
 TOKEN_TELEGRAM = os.getenv("TOKEN_TELEGRAM")
-AUTHORIZED_USERS = os.getenv("AUTHORIZED_USERS")
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "123456789"))
 MAX_GROUPS = 1
 LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
 
