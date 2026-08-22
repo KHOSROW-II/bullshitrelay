@@ -25,6 +25,16 @@ try:
 except ValueError:
     AUTHORIZED_USERS = [-1]
 
+static_groups_str = os.getenv("STATIC_GROUPS", "")
+STATIC_GROUPS = []
+if static_groups_str:
+    try:
+        STATIC_GROUPS = [int(x.strip()) for x in static_groups_str.split(",") if x.strip()]
+        logger.info(f"Static groups loaded: {STATIC_GROUPS}")
+    except ValueError:
+        STATIC_GROUPS = []
+        logger.warning("Invalid STATIC_GROUPS format. Must be comma-separated integers.")
+
 DB_PATH = "groups.db"
 
 logging.basicConfig(level=logging.INFO)
@@ -54,28 +64,42 @@ async def init_db():
         await db.commit()
 
 async def add_group(chat_id: int):
+    if STATIC_GROUPS:
+        logger.info(f"Static mode enabled, ignoring add_group for {chat_id}")
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT OR IGNORE INTO groups (chat_id) VALUES (?)", (chat_id,))
         await db.commit()
 
 async def remove_group(chat_id: int):
+    if STATIC_GROUPS:
+        logger.info(f"Static mode enabled, ignoring remove_group for {chat_id}")
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM groups WHERE chat_id = ?", (chat_id,))
         await db.commit()
 
 async def get_all_groups():
+    if STATIC_GROUPS:
+        logger.debug(f"Using static groups: {STATIC_GROUPS}")
+        return STATIC_GROUPS.copy()
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("SELECT chat_id FROM groups")
         rows = await cursor.fetchall()
         return [row[0] for row in rows]
 
 async def get_group_count():
+    if STATIC_GROUPS:
+        return len(STATIC_GROUPS)
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("SELECT COUNT(*) FROM groups")
         count = await cursor.fetchone()
         return count[0]
 
 async def track_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if STATIC_GROUPS:
+        logger.info("Static mode enabled, ignoring new member tracking")
+        return
     for member in update.message.new_chat_members:
         if member.id == context.bot.id:
             chat_id = update.effective_chat.id
@@ -89,6 +113,9 @@ async def track_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
             break
 
 async def track_left_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if STATIC_GROUPS:
+        logger.info("Static mode enabled, ignoring left member tracking")
+        return
     if update.message.left_chat_member and update.message.left_chat_member.id == context.bot.id:
         chat_id = update.effective_chat.id
         await remove_group(chat_id)
