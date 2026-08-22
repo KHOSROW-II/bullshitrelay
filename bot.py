@@ -14,38 +14,40 @@ import threading
 for var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
     os.environ.pop(var, None)
 
+# ========== تنظیم لاگر در اولین فرصت ==========
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ========== خواندن متغیرهای محیطی ==========
 TOKEN_DISCORD = os.getenv("TOKEN_DISCORD")
 TOKEN_TELEGRAM = os.getenv("TOKEN_TELEGRAM")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "123456789"))
 MAX_GROUPS = 1
 
+AUTHORIZED_USERS = []
 auth_users_str = os.getenv("AUTHORIZED_USERS", "-1")
 try:
     AUTHORIZED_USERS = [int(x.strip()) for x in auth_users_str.split(",") if x.strip()]
 except ValueError:
     AUTHORIZED_USERS = [-1]
 
-static_groups_str = os.getenv("STATIC_GROUPS", "")
 STATIC_GROUPS = []
+static_groups_str = os.getenv("STATIC_GROUPS", "")
 if static_groups_str:
     try:
         STATIC_GROUPS = [int(x.strip()) for x in static_groups_str.split(",") if x.strip()]
         logger.info(f"Static groups loaded: {STATIC_GROUPS}")
     except ValueError:
-        STATIC_GROUPS = []
-        logger.warning("Invalid STATIC_GROUPS format. Must be comma-separated integers.")
+        logger.warning("Invalid STATIC_GROUPS format.")
 else:
     logger.info("STATIC_GROUPS not set, using database mode")
 
 DB_PATH = "groups.db"
-
 LOGGER_ENABLED = False
 telegram_app = None
 discord_bot = None
 
+# ========== بقیه کد ==========
 intents = discord.Intents.default()
 intents.message_content = True
 discord_bot = commands.Bot(command_prefix="-", intents=intents)
@@ -67,7 +69,6 @@ async def init_db():
 
 async def add_group(chat_id: int):
     if STATIC_GROUPS:
-        logger.info(f"Static mode enabled, ignoring add_group for {chat_id}")
         return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT OR IGNORE INTO groups (chat_id) VALUES (?)", (chat_id,))
@@ -75,7 +76,6 @@ async def add_group(chat_id: int):
 
 async def remove_group(chat_id: int):
     if STATIC_GROUPS:
-        logger.info(f"Static mode enabled, ignoring remove_group for {chat_id}")
         return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM groups WHERE chat_id = ?", (chat_id,))
@@ -83,7 +83,6 @@ async def remove_group(chat_id: int):
 
 async def get_all_groups():
     if STATIC_GROUPS:
-        logger.debug(f"Using static groups: {STATIC_GROUPS}")
         return STATIC_GROUPS.copy()
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("SELECT chat_id FROM groups")
@@ -100,7 +99,6 @@ async def get_group_count():
 
 async def track_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if STATIC_GROUPS:
-        logger.info("Static mode enabled, ignoring new member tracking")
         return
     for member in update.message.new_chat_members:
         if member.id == context.bot.id:
@@ -116,7 +114,6 @@ async def track_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def track_left_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if STATIC_GROUPS:
-        logger.info("Static mode enabled, ignoring left member tracking")
         return
     if update.message.left_chat_member and update.message.left_chat_member.id == context.bot.id:
         chat_id = update.effective_chat.id
