@@ -1,0 +1,17 @@
+name: Restart Bot
+
+on:
+  schedule:
+    - cron: '30 5 * * *'
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Railway Deploy
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.RAILWAY_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"operationName":"deploymentRestart","query":"mutation deploymentRestart($id: String!) { deploymentRestart(id: $id) { id status } }","variables":{"id":"4b28c15d-6362-4609-bfd6-d04c4d1f19c5"}}' \
+            https://backboard.railway.com/graphql/v2
