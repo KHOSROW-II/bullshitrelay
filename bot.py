@@ -14,25 +14,22 @@ import threading
 for var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
     os.environ.pop(var, None)
 
-# ========== تنظیم لاگر در اولین فرصت ==========
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ========== خواندن متغیرهای محیطی ==========
 TOKEN_DISCORD = os.getenv("TOKEN_DISCORD")
 TOKEN_TELEGRAM = os.getenv("TOKEN_TELEGRAM")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "123456789"))
 MAX_GROUPS = 1
 
-AUTHORIZED_USERS = []
 auth_users_str = os.getenv("AUTHORIZED_USERS", "-1")
 try:
     AUTHORIZED_USERS = [int(x.strip()) for x in auth_users_str.split(",") if x.strip()]
 except ValueError:
     AUTHORIZED_USERS = [-1]
 
-STATIC_GROUPS = []
 static_groups_str = os.getenv("STATIC_GROUPS", "")
+STATIC_GROUPS = []
 if static_groups_str:
     try:
         STATIC_GROUPS = [int(x.strip()) for x in static_groups_str.split(",") if x.strip()]
@@ -47,12 +44,19 @@ LOGGER_ENABLED = False
 telegram_app = None
 discord_bot = None
 
-# ========== بقیه کد ==========
 intents = discord.Intents.default()
 intents.message_content = True
 discord_bot = commands.Bot(command_prefix="-", intents=intents)
 
 flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def index():
+    return "Bot is running!"
+
+@flask_app.route('/health')
+def health():
+    return "OK", 200
 
 @flask_app.route('/shutdown')
 def shutdown():
@@ -60,7 +64,7 @@ def shutdown():
     os._exit(0)
 
 def run_flask():
-    flask_app.run(host='0.0.0.0', port=8080)
+    flask_app.run(host='0.0.0.0', port=8080, threaded=True)
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
