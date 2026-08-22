@@ -18,7 +18,12 @@ TOKEN_DISCORD = os.getenv("TOKEN_DISCORD")
 TOKEN_TELEGRAM = os.getenv("TOKEN_TELEGRAM")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "123456789"))
 MAX_GROUPS = 1
-LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
+
+auth_users_str = os.getenv("AUTHORIZED_USERS", "-1")
+try:
+    AUTHORIZED_USERS = [int(x.strip()) for x in auth_users_str.split(",") if x.strip()]
+except ValueError:
+    AUTHORIZED_USERS = [-1]
 
 DB_PATH = "groups.db"
 
