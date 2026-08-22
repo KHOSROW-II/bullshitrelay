@@ -2,3 +2,4 @@ python-telegram-bot
 discord.py
 aiosqlite
 httpx
+Flask
