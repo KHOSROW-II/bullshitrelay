@@ -14,6 +14,9 @@ import threading
 for var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
     os.environ.pop(var, None)
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 TOKEN_DISCORD = os.getenv("TOKEN_DISCORD")
 TOKEN_TELEGRAM = os.getenv("TOKEN_TELEGRAM")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "123456789"))
@@ -34,11 +37,10 @@ if static_groups_str:
     except ValueError:
         STATIC_GROUPS = []
         logger.warning("Invalid STATIC_GROUPS format. Must be comma-separated integers.")
+else:
+    logger.info("STATIC_GROUPS not set, using database mode")
 
 DB_PATH = "groups.db"
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 LOGGER_ENABLED = False
 telegram_app = None
