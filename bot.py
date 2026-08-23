@@ -146,7 +146,8 @@ async def get_telegram_avatar_url(user_id, context):
         if photos.total_count > 0:
             file_id = photos.photos[0][-1].file_id
             file = await context.bot.get_file(file_id)
-            avatar_url = f"https://api.telegram.org/file/bot{TOKEN_TELEGRAM}/{file.file_path}"
+            # file.file_path قبلاً آدرس کامل است
+            avatar_url = file.file_path
             logger.info(f"Generated avatar URL for user {user_id}: {avatar_url}")
             return avatar_url
     except Exception as e:
@@ -189,7 +190,6 @@ async def send_file_to_discord(channel, file_bytes, filename, caption, user_name
             color=8305407,
             timestamp=datetime.now(timezone.utc)
         )
-        # استفاده از icon_url برای نمایش آواتار
         embed.set_author(name=user_name, icon_url=avatar_url if avatar_url else None)
         embed.set_footer(text=f"from {platform}")
         if reply_info:
