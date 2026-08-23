@@ -2,8 +2,8 @@ name: Restart Bot
 
 on:
   schedule:
-    - cron: '30 5 * * *'
-
+    - cron: '0 9 * * *'
+      timezone: "Asia/Tehran"
 jobs:
   restart:
     runs-on: ubuntu-latest
