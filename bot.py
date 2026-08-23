@@ -12,6 +12,7 @@ from flask import Flask
 import threading
 import io
 import time
+from datetime import datetime
 
 for var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
     os.environ.pop(var, None)
@@ -49,6 +50,7 @@ discord_bot = None
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.messages = True
 discord_bot = commands.Bot(command_prefix="-", intents=intents)
 
 flask_app = Flask(__name__)
@@ -136,27 +138,52 @@ async def download_telegram_file(file_obj, context):
         logger.error(f"Failed to download file: {e}")
         return None
 
-async def send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform):
+def shorten_text(text, max_len=50):
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "..."
+
+async def send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform, reply_info=None):
     try:
         file_obj = discord.File(io.BytesIO(file_bytes), filename=filename)
-        if caption:
-            await channel.send(f"file from {user_name} on {platform}\n{caption}", file=file_obj)
-        else:
-            await channel.send(f"file from {user_name} on {platform}", file=file_obj)
-        logger.info(f"File {filename} sent to Discord")
+        embed = discord.Embed(
+            description=caption if caption else "",
+            color=8305407,
+            timestamp=datetime.utcnow()
+        )
+        embed.set_author(name=user_name, icon_url=None)
+        embed.set_footer(text=f"from {platform}")
+        if reply_info:
+            embed.add_field(name="Reply to", value=f"{reply_info['replied_user']}: \"{reply_info['short_text']}\"", inline=False)
+        await channel.send(file=file_obj, embed=embed)
+        logger.info(f"File {filename} sent to Discord with embed")
         return True
     except Exception as e:
         logger.error(f"Failed to send file to Discord: {e}")
         return False
 
-async def send_file_to_telegram(chat_id, file_bytes, filename, caption, user_name, platform):
+async def send_file_to_telegram(chat_id, file_bytes, filename, caption, user_name, platform, reply_info=None):
     try:
         file_obj = io.BytesIO(file_bytes)
         file_obj.name = filename
+        text = f"**{user_name}** _(on {platform})_"
         if caption:
-            await telegram_app.bot.send_document(chat_id=chat_id, document=file_obj, caption=f"file from {user_name} on {platform}\n{caption}")
+            text += f"\n{caption}"
+        if reply_info:
+            text += f"\n\n> {reply_info['replied_user']}: {reply_info['short_text']}"
+        
+        # تشخیص نوع فایل بر اساس پسوند
+        ext = filename.split('.')[-1].lower()
+        if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
+            await telegram_app.bot.send_photo(chat_id=chat_id, photo=file_obj, caption=text)
+        elif ext in ['mp4', 'mov', 'avi', 'mkv']:
+            await telegram_app.bot.send_video(chat_id=chat_id, video=file_obj, caption=text)
+        elif ext in ['mp3', 'wav', 'ogg', 'flac']:
+            await telegram_app.bot.send_audio(chat_id=chat_id, audio=file_obj, caption=text)
+        elif ext in ['ogg'] and filename.startswith('voice'):
+            await telegram_app.bot.send_voice(chat_id=chat_id, voice=file_obj, caption=text)
         else:
-            await telegram_app.bot.send_document(chat_id=chat_id, document=file_obj, caption=f"file from {user_name} on {platform}")
+            await telegram_app.bot.send_document(chat_id=chat_id, document=file_obj, caption=text)
         logger.info(f"File {filename} sent to Telegram group {chat_id}")
         return True
     except Exception as e:
@@ -186,103 +213,68 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
 
     msg = update.message
     caption = msg.caption if msg and msg.caption else ""
+    
+    # بررسی ریپلی
+    reply_info = None
+    if msg and msg.reply_to_message:
+        replied_msg = msg.reply_to_message
+        replied_user = replied_msg.from_user.full_name if replied_msg.from_user else "Unknown"
+        replied_text = replied_msg.text or replied_msg.caption or ""
+        short = shorten_text(replied_text, 50)
+        reply_info = {
+            "replied_user": replied_user,
+            "short_text": short
+        }
 
     if msg and msg.text and not msg.photo and not msg.document and not msg.audio and not msg.video and not msg.voice and not msg.video_note and not msg.animation and not msg.sticker:
-        await channel.send(f"message from {user_name} on {platform}\n{msg.text}")
+        embed = discord.Embed(
+            description=msg.text,
+            color=8305407,
+            timestamp=datetime.utcnow()
+        )
+        embed.set_author(name=user_name, icon_url=None)
+        embed.set_footer(text="from Telegram")
+        if reply_info:
+            embed.add_field(name="Reply to", value=f"{reply_info['replied_user']}: \"{reply_info['short_text']}\"", inline=False)
+        await channel.send(embed=embed)
         return
 
-    if msg and msg.photo:
-        file_id = msg.photo[-1].file_id
-        file_obj = await context.bot.get_file(file_id)
-        if file_obj.file_size and file_obj.file_size > MAX_FILE_SIZE:
-            await channel.send(f"File too large ({file_obj.file_size/1024/1024:.1f}MB). Max size: 20MB")
-            return
-        file_bytes = await download_telegram_file(file_obj, context)
-        if file_bytes:
+    if msg and (msg.photo or msg.document or msg.audio or msg.video or msg.voice or msg.video_note or msg.animation or msg.sticker):
+        file_obj = None
+        filename = ""
+        if msg.photo:
+            file_obj = await context.bot.get_file(msg.photo[-1].file_id)
             filename = f"photo_{int(time.time())}.jpg"
-            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
-        return
-
-    if msg and msg.document:
-        doc = msg.document
-        if doc.file_size > MAX_FILE_SIZE:
-            await channel.send(f"File too large ({doc.file_size/1024/1024:.1f}MB). Max size: 20MB")
-            return
-        file_obj = await context.bot.get_file(doc.file_id)
-        file_bytes = await download_telegram_file(file_obj, context)
-        if file_bytes:
-            filename = doc.file_name if doc.file_name else f"document_{int(time.time())}.bin"
-            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
-        return
-
-    if msg and msg.audio:
-        audio = msg.audio
-        if audio.file_size > MAX_FILE_SIZE:
-            await channel.send(f"File too large ({audio.file_size/1024/1024:.1f}MB). Max size: 20MB")
-            return
-        file_obj = await context.bot.get_file(audio.file_id)
-        file_bytes = await download_telegram_file(file_obj, context)
-        if file_bytes:
-            filename = audio.file_name if audio.file_name else f"audio_{int(time.time())}.mp3"
-            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
-        return
-
-    if msg and msg.video:
-        video = msg.video
-        if video.file_size > MAX_FILE_SIZE:
-            await channel.send(f"File too large ({video.file_size/1024/1024:.1f}MB). Max size: 20MB")
-            return
-        file_obj = await context.bot.get_file(video.file_id)
-        file_bytes = await download_telegram_file(file_obj, context)
-        if file_bytes:
+        elif msg.document:
+            file_obj = await context.bot.get_file(msg.document.file_id)
+            filename = msg.document.file_name or f"document_{int(time.time())}.bin"
+        elif msg.audio:
+            file_obj = await context.bot.get_file(msg.audio.file_id)
+            filename = msg.audio.file_name or f"audio_{int(time.time())}.mp3"
+        elif msg.video:
+            file_obj = await context.bot.get_file(msg.video.file_id)
             filename = f"video_{int(time.time())}.mp4"
-            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
-        return
-
-    if msg and msg.voice:
-        voice = msg.voice
-        if voice.file_size > MAX_FILE_SIZE:
-            await channel.send(f"File too large ({voice.file_size/1024/1024:.1f}MB). Max size: 20MB")
-            return
-        file_obj = await context.bot.get_file(voice.file_id)
-        file_bytes = await download_telegram_file(file_obj, context)
-        if file_bytes:
+        elif msg.voice:
+            file_obj = await context.bot.get_file(msg.voice.file_id)
             filename = f"voice_{int(time.time())}.ogg"
-            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
-        return
-
-    if msg and msg.video_note:
-        vn = msg.video_note
-        if vn.file_size > MAX_FILE_SIZE:
-            await channel.send(f"File too large ({vn.file_size/1024/1024:.1f}MB). Max size: 20MB")
-            return
-        file_obj = await context.bot.get_file(vn.file_id)
-        file_bytes = await download_telegram_file(file_obj, context)
-        if file_bytes:
+        elif msg.video_note:
+            file_obj = await context.bot.get_file(msg.video_note.file_id)
             filename = f"video_note_{int(time.time())}.mp4"
-            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
-        return
-
-    if msg and msg.animation:
-        anim = msg.animation
-        if anim.file_size > MAX_FILE_SIZE:
-            await channel.send(f"File too large ({anim.file_size/1024/1024:.1f}MB). Max size: 20MB")
-            return
-        file_obj = await context.bot.get_file(anim.file_id)
-        file_bytes = await download_telegram_file(file_obj, context)
-        if file_bytes:
+        elif msg.animation:
+            file_obj = await context.bot.get_file(msg.animation.file_id)
             filename = f"animation_{int(time.time())}.gif"
-            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
-        return
-
-    if msg and msg.sticker:
-        sticker = msg.sticker
-        file_obj = await context.bot.get_file(sticker.file_id)
-        file_bytes = await download_telegram_file(file_obj, context)
-        if file_bytes:
-            ext = "webp" if sticker.is_animated is False else "tgs"
+        elif msg.sticker:
+            file_obj = await context.bot.get_file(msg.sticker.file_id)
+            ext = "webp" if not msg.sticker.is_animated else "tgs"
             filename = f"sticker_{int(time.time())}.{ext}"
-            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
+        
+        if file_obj:
+            if file_obj.file_size and file_obj.file_size > MAX_FILE_SIZE:
+                await channel.send(f"File too large ({file_obj.file_size/1024/1024:.1f}MB). Max size: 20MB")
+                return
+            file_bytes = await download_telegram_file(file_obj, context)
+            if file_bytes:
+                await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform, reply_info)
         return
 
 @discord_bot.event
@@ -309,11 +301,29 @@ async def on_message(message):
         return
 
     caption = message.content if message.content else ""
+    reply_info = None
+    if message.reference:
+        try:
+            ref_msg = await message.channel.fetch_message(message.reference.message_id)
+            replied_user = ref_msg.author.display_name
+            replied_text = ref_msg.content or ""
+            short = shorten_text(replied_text, 50)
+            reply_info = {
+                "replied_user": replied_user,
+                "short_text": short
+            }
+        except:
+            pass
 
     if message.content and not message.attachments:
+        text = f"**{user_name}** _(on {platform})_"
+        if caption:
+            text += f"\n{caption}"
+        if reply_info:
+            text += f"\n\n> {reply_info['replied_user']}: {reply_info['short_text']}"
         for chat_id in groups:
             try:
-                await telegram_app.bot.send_message(chat_id=chat_id, text=f"message from {user_name} on {platform}\n{message.content}")
+                await telegram_app.bot.send_message(chat_id=chat_id, text=text)
             except Exception as e:
                 logger.warning(f"Failed to send to {chat_id}: {e}")
         await discord_bot.process_commands(message)
@@ -327,7 +337,7 @@ async def on_message(message):
             try:
                 file_bytes = await attachment.read()
                 for chat_id in groups:
-                    await send_file_to_telegram(chat_id, file_bytes, attachment.filename, caption, user_name, platform)
+                    await send_file_to_telegram(chat_id, file_bytes, attachment.filename, caption, user_name, platform, reply_info)
             except Exception as e:
                 logger.error(f"Failed to process attachment: {e}")
                 await message.channel.send(f"Failed to send file: {e}")
