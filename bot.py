@@ -14,6 +14,7 @@ import io
 import time
 from datetime import datetime, timezone
 import html
+import re
 
 for var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
     os.environ.pop(var, None)
@@ -25,7 +26,7 @@ TOKEN_DISCORD = os.getenv("TOKEN_DISCORD")
 TOKEN_TELEGRAM = os.getenv("TOKEN_TELEGRAM")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "123456789"))
 MAX_GROUPS = 1
-MAX_FILE_SIZE = 20 * 1024 * 1024
+MAX_FILE_SIZE = 10 * 1024 * 1024
 
 auth_users_str = os.getenv("AUTHORIZED_USERS", "-1")
 try:
@@ -153,14 +154,34 @@ async def get_telegram_avatar_url(user_id, context):
 def shorten_text(text, max_len=50):
     if not text:
         return ""
-    if len(text) <= max_len:
-        return text
-    return text[:max_len] + "..."
+    # حذف تگ‌های HTML
+    clean = re.sub(r'<[^>]+>', '', text)
+    if len(clean) <= max_len:
+        return clean
+    return clean[:max_len] + "..."
 
 def escape_html(text):
     if not text:
         return ""
     return html.escape(text)
+
+def get_discord_reply_text(message):
+    """دریافت متن خالص از پیام دیسکورد (content یا embed description)"""
+    if message.content:
+        return message.content
+    if message.embeds and message.embeds[0].description:
+        return message.embeds[0].description
+    return ""
+
+def get_telegram_reply_text(update):
+    """دریافت متن خالص از پیام تلگرام (text یا caption)"""
+    if not update or not update.message:
+        return ""
+    if update.message.text:
+        return update.message.text
+    if update.message.caption:
+        return update.message.caption
+    return ""
 
 async def send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform, reply_info=None, avatar_url=None):
     try:
@@ -170,7 +191,7 @@ async def send_file_to_discord(channel, file_bytes, filename, caption, user_name
             color=8305407,
             timestamp=datetime.now(timezone.utc)
         )
-        embed.set_author(name=user_name, icon_url=avatar_url)
+        embed.set_author(name=user_name, icon_url=avatar_url if avatar_url else None)
         embed.set_footer(text=f"from {platform}")
         if reply_info:
             embed.add_field(name="Reply to", value=f"{reply_info['replied_user']}: \"{reply_info['short_text']}\"", inline=False)
@@ -245,7 +266,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
     if msg and msg.reply_to_message:
         replied_msg = msg.reply_to_message
         replied_user = replied_msg.from_user.full_name if replied_msg.from_user else "Unknown"
-        replied_text = replied_msg.text or replied_msg.caption or ""
+        replied_text = get_telegram_reply_text(replied_msg)
         short = shorten_text(replied_text, 50)
         reply_info = {
             "replied_user": replied_user,
@@ -258,7 +279,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
             color=8305407,
             timestamp=datetime.now(timezone.utc)
         )
-        embed.set_author(name=user_name, icon_url=avatar_url)
+        embed.set_author(name=user_name, icon_url=avatar_url if avatar_url else None)
         embed.set_footer(text="from Telegram")
         if reply_info:
             embed.add_field(name="Reply to", value=f"{reply_info['replied_user']}: \"{reply_info['short_text']}\"", inline=False)
@@ -296,7 +317,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         
         if file_obj:
             if file_obj.file_size and file_obj.file_size > MAX_FILE_SIZE:
-                await channel.send(f"File too large ({file_obj.file_size/1024/1024:.1f}MB). Max size: 20MB")
+                await channel.send(f"File too large ({file_obj.file_size/1024/1024:.1f}MB). Max size: 10MB")
                 return
             file_bytes = await download_telegram_file(file_obj, context)
             if file_bytes:
@@ -333,14 +354,14 @@ async def on_message(message):
         try:
             ref_msg = await message.channel.fetch_message(message.reference.message_id)
             replied_user = ref_msg.author.display_name
-            replied_text = ref_msg.content or ""
+            replied_text = get_discord_reply_text(ref_msg)
             short = shorten_text(replied_text, 50)
             reply_info = {
                 "replied_user": replied_user,
                 "short_text": short
             }
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to fetch replied message: {e}")
 
     if message.content and not message.attachments:
         escaped_name = escape_html(user_name)
@@ -363,7 +384,7 @@ async def on_message(message):
     if message.attachments:
         for attachment in message.attachments:
             if attachment.size > MAX_FILE_SIZE:
-                await message.channel.send(f"File too large ({attachment.size/1024/1024:.1f}MB). Max size: 20MB")
+                await message.channel.send(f"File too large ({attachment.size/1024/1024:.1f}MB). Max size: 10MB")
                 continue
             try:
                 file_bytes = await attachment.read()
