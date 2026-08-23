@@ -136,21 +136,27 @@ async def download_telegram_file(file_obj, context):
         logger.error(f"Failed to download file: {e}")
         return None
 
-async def send_file_to_discord(channel, file_bytes, filename, caption):
+async def send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform):
     try:
         file_obj = discord.File(io.BytesIO(file_bytes), filename=filename)
-        await channel.send(file=file_obj, content=caption if caption else None)
+        if caption:
+            await channel.send(f"file from {user_name} on {platform}\n{caption}", file=file_obj)
+        else:
+            await channel.send(f"file from {user_name} on {platform}", file=file_obj)
         logger.info(f"File {filename} sent to Discord")
         return True
     except Exception as e:
         logger.error(f"Failed to send file to Discord: {e}")
         return False
 
-async def send_file_to_telegram(chat_id, file_bytes, filename, caption):
+async def send_file_to_telegram(chat_id, file_bytes, filename, caption, user_name, platform):
     try:
         file_obj = io.BytesIO(file_bytes)
         file_obj.name = filename
-        await telegram_app.bot.send_document(chat_id=chat_id, document=file_obj, caption=caption)
+        if caption:
+            await telegram_app.bot.send_document(chat_id=chat_id, document=file_obj, caption=f"file from {user_name} on {platform}\n{caption}")
+        else:
+            await telegram_app.bot.send_document(chat_id=chat_id, document=file_obj, caption=f"file from {user_name} on {platform}")
         logger.info(f"File {filename} sent to Telegram group {chat_id}")
         return True
     except Exception as e:
@@ -194,7 +200,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         file_bytes = await download_telegram_file(file_obj, context)
         if file_bytes:
             filename = f"photo_{int(time.time())}.jpg"
-            await send_file_to_discord(channel, file_bytes, filename, f"photo from {user_name} on Telegram\n{caption if caption else ''}")
+            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
         return
 
     if msg and msg.document:
@@ -206,7 +212,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         file_bytes = await download_telegram_file(file_obj, context)
         if file_bytes:
             filename = doc.file_name if doc.file_name else f"document_{int(time.time())}.bin"
-            await send_file_to_discord(channel, file_bytes, filename, f"document from {user_name} on Telegram\n{caption if caption else ''}")
+            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
         return
 
     if msg and msg.audio:
@@ -218,7 +224,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         file_bytes = await download_telegram_file(file_obj, context)
         if file_bytes:
             filename = audio.file_name if audio.file_name else f"audio_{int(time.time())}.mp3"
-            await send_file_to_discord(channel, file_bytes, filename, f"audio from {user_name} on Telegram\n{caption if caption else ''}")
+            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
         return
 
     if msg and msg.video:
@@ -230,7 +236,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         file_bytes = await download_telegram_file(file_obj, context)
         if file_bytes:
             filename = f"video_{int(time.time())}.mp4"
-            await send_file_to_discord(channel, file_bytes, filename, f"video from {user_name} on Telegram\n{caption if caption else ''}")
+            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
         return
 
     if msg and msg.voice:
@@ -242,7 +248,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         file_bytes = await download_telegram_file(file_obj, context)
         if file_bytes:
             filename = f"voice_{int(time.time())}.ogg"
-            await send_file_to_discord(channel, file_bytes, filename, f"voice from {user_name} on Telegram\n{caption if caption else ''}")
+            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
         return
 
     if msg and msg.video_note:
@@ -254,7 +260,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         file_bytes = await download_telegram_file(file_obj, context)
         if file_bytes:
             filename = f"video_note_{int(time.time())}.mp4"
-            await send_file_to_discord(channel, file_bytes, filename, f"video note from {user_name} on Telegram\n{caption if caption else ''}")
+            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
         return
 
     if msg and msg.animation:
@@ -266,7 +272,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         file_bytes = await download_telegram_file(file_obj, context)
         if file_bytes:
             filename = f"animation_{int(time.time())}.gif"
-            await send_file_to_discord(channel, file_bytes, filename, f"animation from {user_name} on Telegram\n{caption if caption else ''}")
+            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
         return
 
     if msg and msg.sticker:
@@ -276,7 +282,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         if file_bytes:
             ext = "webp" if sticker.is_animated is False else "tgs"
             filename = f"sticker_{int(time.time())}.{ext}"
-            await send_file_to_discord(channel, file_bytes, filename, f"sticker from {user_name} on Telegram")
+            await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform)
         return
 
 @discord_bot.event
@@ -302,6 +308,8 @@ async def on_message(message):
         await discord_bot.process_commands(message)
         return
 
+    caption = message.content if message.content else ""
+
     if message.content and not message.attachments:
         for chat_id in groups:
             try:
@@ -319,7 +327,7 @@ async def on_message(message):
             try:
                 file_bytes = await attachment.read()
                 for chat_id in groups:
-                    await send_file_to_telegram(chat_id, file_bytes, attachment.filename, f"file from {user_name} on Discord")
+                    await send_file_to_telegram(chat_id, file_bytes, attachment.filename, caption, user_name, platform)
             except Exception as e:
                 logger.error(f"Failed to process attachment: {e}")
                 await message.channel.send(f"Failed to send file: {e}")
