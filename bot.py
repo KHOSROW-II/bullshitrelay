@@ -138,12 +138,25 @@ async def download_telegram_file(file_obj, context):
         logger.error(f"Failed to download file: {e}")
         return None
 
+async def get_telegram_avatar_url(user_id, context):
+    try:
+        photos = await context.bot.get_user_profile_photos(user_id, limit=1)
+        if photos.total_count > 0:
+            file_id = photos.photos[0][-1].file_id
+            file = await context.bot.get_file(file_id)
+            return f"https://api.telegram.org/file/bot{TOKEN_TELEGRAM}/{file.file_path}"
+    except Exception as e:
+        logger.warning(f"Failed to get avatar for {user_id}: {e}")
+    return None
+
 def shorten_text(text, max_len=50):
+    if not text:
+        return ""
     if len(text) <= max_len:
         return text
     return text[:max_len] + "..."
 
-async def send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform, reply_info=None):
+async def send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform, reply_info=None, avatar_url=None):
     try:
         file_obj = discord.File(io.BytesIO(file_bytes), filename=filename)
         embed = discord.Embed(
@@ -151,7 +164,7 @@ async def send_file_to_discord(channel, file_bytes, filename, caption, user_name
             color=8305407,
             timestamp=datetime.utcnow()
         )
-        embed.set_author(name=user_name, icon_url=None)
+        embed.set_author(name=user_name, icon_url=avatar_url)
         embed.set_footer(text=f"from {platform}")
         if reply_info:
             embed.add_field(name="Reply to", value=f"{reply_info['replied_user']}: \"{reply_info['short_text']}\"", inline=False)
@@ -166,13 +179,14 @@ async def send_file_to_telegram(chat_id, file_bytes, filename, caption, user_nam
     try:
         file_obj = io.BytesIO(file_bytes)
         file_obj.name = filename
-        text = f"**{user_name}** _(on {platform})_"
-        if caption:
-            text += f"\n{caption}"
-        if reply_info:
-            text += f"\n\n> {reply_info['replied_user']}: {reply_info['short_text']}"
         
-        # تشخیص نوع فایل بر اساس پسوند
+        # فرمت جدید برای تلگرام
+        text = f"**{user_name}** `(on {platform})`"
+        if caption:
+            text += f"\n> {caption}"
+        if reply_info:
+            text += f"\n\n> **{reply_info['replied_user']}:** {reply_info['short_text']}"
+        
         ext = filename.split('.')[-1].lower()
         if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
             await telegram_app.bot.send_photo(chat_id=chat_id, photo=file_obj, caption=text)
@@ -200,6 +214,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         return
     
     user_name = update.effective_user.full_name if update.effective_user else "Unknown"
+    user_id = update.effective_user.id if update.effective_user else None
     platform = "Telegram"
     channel = discord_bot.get_channel(LOG_CHANNEL_ID)
     if not channel:
@@ -213,6 +228,11 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
 
     msg = update.message
     caption = msg.caption if msg and msg.caption else ""
+    
+    # دریافت آواتار کاربر تلگرام
+    avatar_url = None
+    if user_id:
+        avatar_url = await get_telegram_avatar_url(user_id, context)
     
     # بررسی ریپلی
     reply_info = None
@@ -232,7 +252,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
             color=8305407,
             timestamp=datetime.utcnow()
         )
-        embed.set_author(name=user_name, icon_url=None)
+        embed.set_author(name=user_name, icon_url=avatar_url)
         embed.set_footer(text="from Telegram")
         if reply_info:
             embed.add_field(name="Reply to", value=f"{reply_info['replied_user']}: \"{reply_info['short_text']}\"", inline=False)
@@ -274,7 +294,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
                 return
             file_bytes = await download_telegram_file(file_obj, context)
             if file_bytes:
-                await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform, reply_info)
+                await send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform, reply_info, avatar_url)
         return
 
 @discord_bot.event
@@ -301,6 +321,8 @@ async def on_message(message):
         return
 
     caption = message.content if message.content else ""
+    
+    # بررسی ریپلی در دیسکورد
     reply_info = None
     if message.reference:
         try:
@@ -316,11 +338,12 @@ async def on_message(message):
             pass
 
     if message.content and not message.attachments:
-        text = f"**{user_name}** _(on {platform})_"
+        # فرمت جدید برای تلگرام
+        text = f"**{user_name}** `(on {platform})`"
         if caption:
-            text += f"\n{caption}"
+            text += f"\n> {caption}"
         if reply_info:
-            text += f"\n\n> {reply_info['replied_user']}: {reply_info['short_text']}"
+            text += f"\n\n> **{reply_info['replied_user']}:** {reply_info['short_text']}"
         for chat_id in groups:
             try:
                 await telegram_app.bot.send_message(chat_id=chat_id, text=text)
