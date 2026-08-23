@@ -154,7 +154,6 @@ async def get_telegram_avatar_url(user_id, context):
 def shorten_text(text, max_len=50):
     if not text:
         return ""
-    # حذف تگ‌های HTML
     clean = re.sub(r'<[^>]+>', '', text)
     if len(clean) <= max_len:
         return clean
@@ -166,21 +165,19 @@ def escape_html(text):
     return html.escape(text)
 
 def get_discord_reply_text(message):
-    """دریافت متن خالص از پیام دیسکورد (content یا embed description)"""
     if message.content:
         return message.content
     if message.embeds and message.embeds[0].description:
         return message.embeds[0].description
     return ""
 
-def get_telegram_reply_text(update):
-    """دریافت متن خالص از پیام تلگرام (text یا caption)"""
-    if not update or not update.message:
+def get_telegram_reply_text(message):
+    if not message:
         return ""
-    if update.message.text:
-        return update.message.text
-    if update.message.caption:
-        return update.message.caption
+    if message.text:
+        return message.text
+    if message.caption:
+        return message.caption
     return ""
 
 async def send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform, reply_info=None, avatar_url=None):
