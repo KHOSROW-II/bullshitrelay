@@ -12,7 +12,8 @@ from flask import Flask
 import threading
 import io
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+import html
 
 for var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
     os.environ.pop(var, None)
@@ -156,13 +157,18 @@ def shorten_text(text, max_len=50):
         return text
     return text[:max_len] + "..."
 
+def escape_html(text):
+    if not text:
+        return ""
+    return html.escape(text)
+
 async def send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform, reply_info=None, avatar_url=None):
     try:
         file_obj = discord.File(io.BytesIO(file_bytes), filename=filename)
         embed = discord.Embed(
             description=caption if caption else "",
             color=8305407,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         embed.set_author(name=user_name, icon_url=avatar_url)
         embed.set_footer(text=f"from {platform}")
@@ -179,25 +185,27 @@ async def send_file_to_telegram(chat_id, file_bytes, filename, caption, user_nam
     try:
         file_obj = io.BytesIO(file_bytes)
         file_obj.name = filename
-        
-        # فرمت جدید برای تلگرام
-        text = f"**{user_name}** `(on {platform})`"
-        if caption:
-            text += f"\n> {caption}"
+        escaped_name = escape_html(user_name)
+        escaped_caption = escape_html(caption) if caption else ""
+        text = f"<b>{escaped_name}</b> <code>(on {platform})</code>"
+        if escaped_caption:
+            text += f"\n<blockquote>{escaped_caption}</blockquote>"
         if reply_info:
-            text += f"\n\n> **{reply_info['replied_user']}:** {reply_info['short_text']}"
+            replied_user = escape_html(reply_info['replied_user'])
+            short_text = escape_html(reply_info['short_text'])
+            text += f"\n\n<blockquote><b>{replied_user}:</b> {short_text}</blockquote>"
         
         ext = filename.split('.')[-1].lower()
         if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
-            await telegram_app.bot.send_photo(chat_id=chat_id, photo=file_obj, caption=text)
+            await telegram_app.bot.send_photo(chat_id=chat_id, photo=file_obj, caption=text, parse_mode='HTML')
         elif ext in ['mp4', 'mov', 'avi', 'mkv']:
-            await telegram_app.bot.send_video(chat_id=chat_id, video=file_obj, caption=text)
+            await telegram_app.bot.send_video(chat_id=chat_id, video=file_obj, caption=text, parse_mode='HTML')
         elif ext in ['mp3', 'wav', 'ogg', 'flac']:
-            await telegram_app.bot.send_audio(chat_id=chat_id, audio=file_obj, caption=text)
+            await telegram_app.bot.send_audio(chat_id=chat_id, audio=file_obj, caption=text, parse_mode='HTML')
         elif ext in ['ogg'] and filename.startswith('voice'):
-            await telegram_app.bot.send_voice(chat_id=chat_id, voice=file_obj, caption=text)
+            await telegram_app.bot.send_voice(chat_id=chat_id, voice=file_obj, caption=text, parse_mode='HTML')
         else:
-            await telegram_app.bot.send_document(chat_id=chat_id, document=file_obj, caption=text)
+            await telegram_app.bot.send_document(chat_id=chat_id, document=file_obj, caption=text, parse_mode='HTML')
         logger.info(f"File {filename} sent to Telegram group {chat_id}")
         return True
     except Exception as e:
@@ -229,12 +237,10 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
     msg = update.message
     caption = msg.caption if msg and msg.caption else ""
     
-    # دریافت آواتار کاربر تلگرام
     avatar_url = None
     if user_id:
         avatar_url = await get_telegram_avatar_url(user_id, context)
     
-    # بررسی ریپلی
     reply_info = None
     if msg and msg.reply_to_message:
         replied_msg = msg.reply_to_message
@@ -250,7 +256,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         embed = discord.Embed(
             description=msg.text,
             color=8305407,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         embed.set_author(name=user_name, icon_url=avatar_url)
         embed.set_footer(text="from Telegram")
@@ -322,7 +328,6 @@ async def on_message(message):
 
     caption = message.content if message.content else ""
     
-    # بررسی ریپلی در دیسکورد
     reply_info = None
     if message.reference:
         try:
@@ -338,15 +343,18 @@ async def on_message(message):
             pass
 
     if message.content and not message.attachments:
-        # فرمت جدید برای تلگرام
-        text = f"**{user_name}** `(on {platform})`"
-        if caption:
-            text += f"\n> {caption}"
+        escaped_name = escape_html(user_name)
+        escaped_caption = escape_html(caption)
+        text = f"<b>{escaped_name}</b> <code>(on {platform})</code>"
+        if escaped_caption:
+            text += f"\n<blockquote>{escaped_caption}</blockquote>"
         if reply_info:
-            text += f"\n\n> **{reply_info['replied_user']}:** {reply_info['short_text']}"
+            replied_user = escape_html(reply_info['replied_user'])
+            short_text = escape_html(reply_info['short_text'])
+            text += f"\n\n<blockquote><b>{replied_user}:</b> {short_text}</blockquote>"
         for chat_id in groups:
             try:
-                await telegram_app.bot.send_message(chat_id=chat_id, text=text)
+                await telegram_app.bot.send_message(chat_id=chat_id, text=text, parse_mode='HTML')
             except Exception as e:
                 logger.warning(f"Failed to send to {chat_id}: {e}")
         await discord_bot.process_commands(message)
