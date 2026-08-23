@@ -46,7 +46,7 @@ else:
     logger.info("STATIC_GROUPS not set, using database mode")
 
 DB_PATH = "groups.db"
-LOGGER_ENABLED = False
+LOGGER_ENABLED = True
 telegram_app = None
 discord_bot = None
 
