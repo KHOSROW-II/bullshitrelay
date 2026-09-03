@@ -5,7 +5,7 @@ import logging
 import aiosqlite
 import discord
 from discord.ext import commands
-from telegram import Update
+from telegram import Update, MessageEntity
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 from flask import Flask
@@ -47,6 +47,8 @@ else:
 
 DB_PATH = "groups.db"
 LOGGER_ENABLED = True
+ANTI_SPAM_ENABLED = True
+ANTI_SPAM_LIMIT = 6
 telegram_app = None
 discord_bot = None
 
@@ -146,7 +148,6 @@ async def get_telegram_avatar_url(user_id, context):
         if photos.total_count > 0:
             file_id = photos.photos[0][-1].file_id
             file = await context.bot.get_file(file_id)
-            # file.file_path قبلاً آدرس کامل است
             avatar_url = file.file_path
             logger.info(f"Generated avatar URL for user {user_id}: {avatar_url}")
             return avatar_url
@@ -182,6 +183,35 @@ def get_telegram_reply_text(message):
     if message.caption:
         return message.caption
     return ""
+
+def count_telegram_mentions(message):
+    if not message or not message.entities:
+        return 0
+    count = 0
+    for entity in message.entities:
+        if entity.type in [MessageEntity.MENTION, MessageEntity.TEXT_MENTION]:
+            count += 1
+    return count
+
+async def handle_telegram_antispam(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not ANTI_SPAM_ENABLED:
+        return
+    if not update.message:
+        return
+    if not update.message.text:
+        return
+    if update.effective_user and update.effective_user.id == context.bot.id:
+        return
+    if update.effective_chat.type == "private":
+        return
+    mention_count = count_telegram_mentions(update.message)
+    if mention_count >= ANTI_SPAM_LIMIT:
+        try:
+            await update.message.delete()
+            await update.message.reply_text(f"@{update.effective_user.username or update.effective_user.first_name} siktir")
+            logger.info(f"Anti-spam triggered for {update.effective_user.id} with {mention_count} mentions")
+        except Exception as e:
+            logger.error(f"Failed to handle anti-spam: {e}")
 
 async def send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform, reply_info=None, avatar_url=None):
     try:
@@ -258,6 +288,8 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
         return
     if update.effective_chat.type == "private":
         return
+    
+    await handle_telegram_antispam(update, context)
     
     user_name = update.effective_user.full_name if update.effective_user else "Unknown"
     user_id = update.effective_user.id if update.effective_user else None
@@ -344,6 +376,15 @@ async def on_message(message):
         return
     if not LOGGER_ENABLED or not message.guild:
         await discord_bot.process_commands(message)
+        return
+
+    if ANTI_SPAM_ENABLED and len(message.mentions) >= ANTI_SPAM_LIMIT:
+        try:
+            await message.delete()
+            await message.channel.send(f"{message.author.mention} siktir")
+            logger.info(f"Anti-spam triggered for {message.author.id} with {len(message.mentions)} mentions")
+        except Exception as e:
+            logger.error(f"Failed to handle anti-spam in Discord: {e}")
         return
 
     user_name = message.author.display_name
@@ -436,6 +477,16 @@ async def logger_command(ctx):
     LOGGER_ENABLED = not LOGGER_ENABLED
     status = "enabled" if LOGGER_ENABLED else "disabled"
     await ctx.send(f"Message logger is now {status}.")
+
+@discord_bot.command(name="antispam")
+async def antispam_command(ctx):
+    global ANTI_SPAM_ENABLED
+    if -1 not in AUTHORIZED_USERS and ctx.author.id not in AUTHORIZED_USERS:
+        await ctx.send("You are not authorized to use this command.")
+        return
+    ANTI_SPAM_ENABLED = not ANTI_SPAM_ENABLED
+    status = "enabled" if ANTI_SPAM_ENABLED else "disabled"
+    await ctx.send(f"Anti-spam is now {status}.")
 
 async def run_bots():
     global telegram_app
