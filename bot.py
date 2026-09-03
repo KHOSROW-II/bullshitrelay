@@ -193,12 +193,14 @@ def count_telegram_mentions(message):
             count += 1
     return count
 
+def count_discord_mention_tags(text):
+    # شمارش تمام تگ‌های منشن کاربران در متن (حتی اگر کاربر در سرور نباشد)
+    return len(re.findall(r'<@!?\d+>', text))
+
 async def handle_telegram_antispam(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not ANTI_SPAM_ENABLED:
         return
-    if not update.message:
-        return
-    if not update.message.text:
+    if not update.message or not update.message.text:
         return
     if update.effective_user and update.effective_user.id == context.bot.id:
         return
@@ -211,7 +213,7 @@ async def handle_telegram_antispam(update: Update, context: ContextTypes.DEFAULT
             await update.message.reply_text(f"@{update.effective_user.username or update.effective_user.first_name} siktir")
             logger.info(f"Anti-spam triggered for {update.effective_user.id} with {mention_count} mentions")
         except Exception as e:
-            logger.error(f"Failed to handle anti-spam: {e}")
+            logger.error(f"Failed to handle anti-spam in Telegram: {e}")
 
 async def send_file_to_discord(channel, file_bytes, filename, caption, user_name, platform, reply_info=None, avatar_url=None):
     try:
@@ -289,6 +291,7 @@ async def telegram_message_handler(update: Update, context: ContextTypes.DEFAULT
     if update.effective_chat.type == "private":
         return
     
+    # Anti-spam check for Telegram
     await handle_telegram_antispam(update, context)
     
     user_name = update.effective_user.full_name if update.effective_user else "Unknown"
@@ -378,14 +381,25 @@ async def on_message(message):
         await discord_bot.process_commands(message)
         return
 
-    if ANTI_SPAM_ENABLED and len(message.mentions) >= ANTI_SPAM_LIMIT:
-        try:
-            await message.delete()
-            await message.channel.send(f"{message.author.mention} siktir")
-            logger.info(f"Anti-spam triggered for {message.author.id} with {len(message.mentions)} mentions")
-        except Exception as e:
-            logger.error(f"Failed to handle anti-spam in Discord: {e}")
-        return
+    # Anti-spam for Discord
+    if ANTI_SPAM_ENABLED:
+        mention_count = len(message.mentions)  # unique mentioned users
+        total_mention_tags = count_discord_mention_tags(message.content)  # all <@...> tags
+        logger.info(f"Anti-spam check: mentions={mention_count}, total_tags={total_mention_tags}")
+        
+        if total_mention_tags >= ANTI_SPAM_LIMIT or mention_count >= ANTI_SPAM_LIMIT:
+            try:
+                await message.delete()
+                await message.channel.send(f"{message.author.mention} siktir")
+                logger.info(f"Anti-spam triggered for {message.author.id}: {mention_count} unique, {total_mention_tags} total tags")
+                return
+            except discord.Forbidden:
+                logger.error("Anti-spam: Bot doesn't have permission to delete messages.")
+                await message.channel.send("I don't have permission to delete messages. Please give me 'Manage Messages' permission.")
+                return
+            except Exception as e:
+                logger.error(f"Anti-spam error: {e}")
+                return
 
     user_name = message.author.display_name
     platform = "Discord"
